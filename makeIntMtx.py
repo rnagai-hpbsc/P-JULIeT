@@ -105,9 +105,9 @@ def ijCalc(args):
     logYUp  = logY + 0.5*0.01
     result = 0
     if YZ == 'y':
-        result = stauObj.getPartialSigma(logYLow,logYUp,E,interactionName)
+        result = stauObj.getPartialSigma(logYLow,logYUp,E,interactionName,method='quad')
     elif YZ == 'z':
-        result = stauObj.getSurviveProb(10**logYLow,10**logYUp,E,interactionName)
+        result = stauObj.getSurviveProb(10**logYLow,10**logYUp,E,interactionName,method='quad')
     else:
         pass
     return i,j,result
