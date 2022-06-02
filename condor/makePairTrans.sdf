@@ -7,11 +7,12 @@ Notification = Error
 
 p1 = PARTICLE
 p2 = MASS
+p3 = TODAYSDATE
 ## e - trans
-Output = condor/log/ver0601/$(p1)trans.stdout
-Error  = condor/log/ver0601/$(p1)trans.stderr
-Log    = condor/log/ver0601/$(p1)trans.log
+Output = condor/log/ver$(p3)/$(p1)trans.stdout
+Error  = condor/log/ver$(p3)/$(p1)trans.stderr
+Log    = condor/log/ver$(p3)/$(p1)trans.log
 
-Arguments = --out $(p1) --mass $(p2) --interaction pairc --sdir condor_0601 transmtxelement -i $(item)
+Arguments = --out $(p1) --mass $(p2) --interaction pairc --sdir condor_$(p3) transmtxelement -i $(item)
 Queue from seq 0 349 | 
 
