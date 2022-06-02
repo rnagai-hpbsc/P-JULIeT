@@ -1,0 +1,17 @@
+#test1 
+
+Executable = ./makeIntMtxDiv.py
+Universe = vanilla
+Getenv = True
+Notification = Error
+
+p1 = PARTICLE
+p2 = MASS
+## e - trans
+Output = condor/log/ver0601/$(p1)trans.stdout
+Error  = condor/log/ver0601/$(p1)trans.stderr
+Log    = condor/log/ver0601/$(p1)trans.log
+
+Arguments = --out $(p1) --mass $(p2) --interaction pairc --sdir condor_0601 transmtxelement -i $(item)
+Queue from seq 0 349 | 
+

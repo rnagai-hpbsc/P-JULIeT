@@ -8,6 +8,8 @@ import sys, os
 from multiprocessing import Pool
 import itertools
 
+SERIAL_JOBS = 701
+
 @click.group()
 @click.option('--mass',type=int,default=150)
 @click.option('--out',type=str,default='e')
@@ -47,7 +49,6 @@ def calcDiagonalTrans(ctx,z):
 @click.option('--method',default=None)
 @click.pass_context
 def transMtxElement(ctx,i,z,verify,method):
-    SERIAL_JOBS = 25
     calctype = 'z' if z else 'y'
     filetype = 'surviv' if z else 'trans'
     iLogEs = []
@@ -99,7 +100,8 @@ def formTransMtx(ctx,z):
         for line in f:
             linenumber+=1
             words = line.split(',')
-            if len(words)<3: 
+            if len(words)!=3:
+                print(f"WARNING: Wrong value -- {linenumber}:{line}")
                 continue
             else:
                 transMtx[int(words[0])][int(words[1])] = float(words[2])
@@ -141,6 +143,59 @@ def inelaMtx(ctx):
             if i+1 < len(inelaMtx):
                 f.write(',')
     return 
+
+@cli.command()
+@click.pass_context
+@click.option('-i',type=int,default=0)
+@click.option('-j',type=int,default=0)
+@click.option('-z',is_flag=True)
+def verifyTransElement(ctx,i,j,z):
+    value = -1
+    filename = ctx.obj['filename']
+    filetype = 'surviv' if z else 'trans'
+    with open(f'{filename}_{filetype}.txt','r') as f:
+        linenum = 0
+        for line in f:
+            if linenum==i:
+                wordnum = 0
+                for word in line.split(','):
+                    if wordnum==j:
+                        value = float(word)
+                        break
+                    else:
+                        wordnum += 1
+            else:
+                linenum += 1
+    stauObj = ctx.obj['stauObj']
+    interaction = ctx.obj['interaction']
+    calctype = 'z' if z else 'y'
+    element = getElement(i,j,stauObj,calctype,interaction,method='quad')
+    print(value, element)
+    return
+
+@cli.command()
+@click.pass_context
+@click.option('-z',is_flag=True)
+def verifyTransMtx(ctx,z):
+    filename = ctx.obj['filename']
+    filetype = 'surviv' if z else 'trans'
+    stauObj = ctx.obj['stauObj']
+    interaction = ctx.obj['interaction']
+    calctype = 'z' if z else 'y'
+    reconMtx = []
+    with open(f'{filename}_{filetype}.txt','r') as f:
+        for line in f:
+            reconMtx.append(np.array([float(x) for x in line.split(',')]))
+    for N in range(350*701):
+        i, j = getij(N)
+        value = reconMtx[i][j]
+        if value <= 0.0:
+            element = getElement(i,j,stauObj,calctype,interaction,method='quad')
+            print(f"WARNING: Wrong value for (i,j) == ({i},{j}), value == {value}, truth == {element}")
+            with open(f"{ctx.obj['filename']}_{filetype}_tmp.txt",'a') as f:
+                f.write(f'{i},{j},{element}\n')
+    return
+
 
 def init(mass, material, out, interaction):
     stauObj = xs.XsecCalculator(m_lep=mass,material=material)
