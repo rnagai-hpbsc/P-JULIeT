@@ -118,11 +118,15 @@ def formTransMtx(ctx,z):
 
 @cli.command()
 @click.pass_context
-def sigmaMtx(ctx):
+@click.option('--method',type=str,default='quadLog')
+@click.option('--verify',is_flag=True)
+def sigmaMtx(ctx,method,verify):
     filename = ctx.obj['filename']
     stauObj = ctx.obj['stauObj']
     interaction = ctx.obj['interaction']
-    sigmaMtx = getSigmaArray(stauObj,interaction)
+    sigmaMtx = getSigmaArray(stauObj,interaction,method,verify)
+    if verify:
+        sys.exit()
     with open(f'{filename}_sigma.txt','w') as f:
         for i,sigma in enumerate(sigmaMtx):
             f.write(str(sigma))
@@ -132,11 +136,15 @@ def sigmaMtx(ctx):
 
 @cli.command()
 @click.pass_context
-def inelaMtx(ctx):
+@click.option('--method',type=str,default='quadLog')
+@click.option('--verify',is_flag=True)
+def inelaMtx(ctx,method,verify):
     filename = ctx.obj['filename']
     stauObj = ctx.obj['stauObj']
     interaction = ctx.obj['interaction']
-    inelaMtx = getInelasticityArray(stauObj,interaction)
+    inelaMtx = getInelasticityArray(stauObj,interaction,method,verify)
+    if verify:
+        sys.exit()
     with open(f'{filename}_inela.txt','w') as f:
         for i,inela in enumerate(inelaMtx):
             f.write(str(inela))
@@ -196,6 +204,29 @@ def verifyTransMtx(ctx,z):
                 f.write(f'{i},{j},{element}\n')
     return
 
+@cli.command()
+@click.pass_context
+@click.option('-i',type=int,default=0)
+@click.option('-j',type=int,default=0)
+@click.option('-z',is_flag=True)
+@click.option('--method',type=str,default='quad')
+def singleTransElement(ctx,i,j,z,method):
+    stauObj = ctx.obj['stauObj']
+    calctype = 'z' if z else 'y'
+    interaction = ctx.obj['interaction']
+    element = getElement(i,j,stauObj,calctype,interaction,method)
+    print(element)
+    return
+
+@cli.command()
+@click.pass_context
+@click.option('-i',type=int,default=350)
+def verifyElement(ctx,i):
+    xdata = np.linspace(-0.005,0.005)
+    stauObj = ctx.obj['stauObj']
+    calctype = 'z' if z else 'y'
+    interaction = ctx.obj['interaction']
+    #ydata = stauObj.getDSigmaDy()
 
 def init(mass, material, out, interaction):
     stauObj = xs.XsecCalculator(m_lep=mass,material=material)
@@ -217,22 +248,26 @@ def init(mass, material, out, interaction):
         sys.exit()
     return stauObj, interactionName
 
-def getSigmaArray(stauObj,interaction):
+def getSigmaArray(stauObj,interaction,method='quadLog',verify=False):
     sigmaMtx = []
-    for logE in tqdm(range(700)):
+    totalnumber = 700 if not verify else 7
+    for i in tqdm(range(totalnumber)):
+        logE = i if not verify else 100*i
         E = 10**(5+0.01*logE)
-        sigma = stauObj.getSigma(E,interaction,'quadLog')
+        sigma = stauObj.getSigma(E,interaction,method)
         sigmaMtx.append(sigma)
-    print(sigmaMtx[::10])
+    print(sigmaMtx[::10] if not verify else sigmaMtx)
     return sigmaMtx
 
-def getInelasticityArray(stauObj,interaction):
+def getInelasticityArray(stauObj,interaction,method='quadLog',verify=False):
     inelaMtx = []
-    for logE in tqdm(range(700)):
+    totalnumber = 700 if not verify else 7
+    for i in tqdm(range(totalnumber)):
+        logE = i if not verify else 100*i
         E = 10**(5+0.01*logE)
-        inela = stauObj.getEnergyLossRaw(E,interaction,'quadLog')
+        inela = stauObj.getEnergyLossRaw(E,interaction,method)
         inelaMtx.append(inela)
-    print(inelaMtx[::10])
+    print(inelaMtx[::10] if not verify else stauObj.NA/stauObj.A*inelaMtx)
     return inelaMtx
 
 def getElement(i,j,stauObj,YZ,interactionName,method='quad'):

@@ -81,7 +81,8 @@ def getSigmaArray(stauObj,interaction):
     sigmaMtx = []
     for logE in tqdm(range(700)):
         E = 10**(5+0.01*logE)
-        sigma = stauObj.getSigma(E,interaction,'quadLog')
+        method = 'quad' if interaction == 'phnuc' else 'quadLog'
+        sigma = stauObj.getSigma(E,interaction,method)
         sigmaMtx.append(sigma)
     print(sigmaMtx[::10])
     return sigmaMtx
@@ -90,7 +91,8 @@ def getInelasticityArray(stauObj,interaction):
     inelaMtx = []
     for logE in tqdm(range(700)):
         E = 10**(5+0.01*logE)
-        inela = stauObj.getEnergyLossRaw(E,interaction,'quadLog')
+        method = 'quad' if interaction == 'phnuc' else 'quadLog'
+        inela = stauObj.getEnergyLossRaw(E,interaction,method)
         inelaMtx.append(inela)
     print(inelaMtx[::10])
     return inelaMtx
