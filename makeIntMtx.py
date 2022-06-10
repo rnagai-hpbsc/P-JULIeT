@@ -8,6 +8,8 @@ import sys, os
 from multiprocessing import Pool
 import itertools
 
+EPSNUM = 1e-26
+
 @click.command()
 @click.option('--mass',type=int,default=150)
 @click.option('--out',type=str,default='e')
@@ -18,6 +20,8 @@ import itertools
 @click.option('--verify',is_flag=True)
 def main(mass,out,material,interaction,sdir,nprocess,verify):
     stauObj = xs.XsecCalculator(m_lep=mass,material=material)
+    #if (interaction == 'brems') or (interaction == 'phnuc'):
+    #    stauObj.setEps(EPSNUM)
 
     if out=='e':
         stauObj.setMout('e')
@@ -43,6 +47,14 @@ def main(mass,out,material,interaction,sdir,nprocess,verify):
     sigmaMtx = getSigmaArray(stauObj,interaction)
     inelaMtx = getInelasticityArray(stauObj,interaction)
 
+    for i in range(len(sigmaMtx)):
+        if np.sum(transMtx[i]) > sigmaMtx[i]:
+            print(f"WARNING: sum(transMtx) larger than total at i={i}")
+        if np.sum(survivMtx[i]) > sigmaMtx[i]:
+            print(f"WARNING: sum(survivMtx) larger than total at i={i}")
+        if survivMtx[i][i] > sigmaMtx[i]:
+            print(f"WARNING: survivMtx[{i}][{i}] larger than total.")
+            survivMtx[i][i] = sigmaMtx[i] - np.sum(survivMtx[i]) + survivMtx[i][i] 
 
     if verify:
         for i in range(700):
@@ -50,7 +62,7 @@ def main(mass,out,material,interaction,sdir,nprocess,verify):
         print(len(transMtx))
         return 
 
-    with open(f'{filename}_sigma.txt','w') as f:
+    with open(f'{filename}_sigma_direct.txt','w') as f:
         for i,sigma in enumerate(sigmaMtx):
             f.write(str(sigma))
             if i+1 < len(sigmaMtx):
@@ -81,8 +93,8 @@ def getSigmaArray(stauObj,interaction):
     sigmaMtx = []
     for logE in tqdm(range(700)):
         E = 10**(5+0.01*logE)
-        method = 'quad' if interaction == 'phnuc' else 'quadLog'
-        sigma = stauObj.getSigma(E,interaction,method)
+        method = 'quadLog'
+        sigma = stauObj.getSigma(E,interaction,method=method)
         sigmaMtx.append(sigma)
     print(sigmaMtx[::10])
     return sigmaMtx
@@ -91,8 +103,8 @@ def getInelasticityArray(stauObj,interaction):
     inelaMtx = []
     for logE in tqdm(range(700)):
         E = 10**(5+0.01*logE)
-        method = 'quad' if interaction == 'phnuc' else 'quadLog'
-        inela = stauObj.getEnergyLossRaw(E,interaction,method)
+        method = 'quadLog'
+        inela = stauObj.getEnergyLossRaw(E,interaction,method=method)
         inelaMtx.append(inela)
     print(inelaMtx[::10])
     return inelaMtx
