@@ -5,10 +5,10 @@ import numpy as np
 import Xsec_libs as xs
 from tqdm import tqdm
 import sys, os
-from multiprocessing import Pool
-import itertools
+import matplotlib.pyplot as plt
 
 SERIAL_JOBS = 701
+EPSNUM = 3.e-26
 
 @click.group()
 @click.option('--mass',type=int,default=150)
@@ -16,9 +16,12 @@ SERIAL_JOBS = 701
 @click.option('--material',type=str,default='rock')
 @click.option('--interaction',type=str,required=True)
 @click.option('--sdir',type=str,default='test')
+@click.option('--eps',default=None)
 @click.pass_context
-def cli(ctx,mass,out,material,interaction,sdir):
+def cli(ctx,mass,out,material,interaction,sdir,eps):
     stauObj, interactionName = init(mass,material,out,interaction)
+    if eps is not None:
+        stauObj.setEps(float(eps))
     ctx.ensure_object(dict)
     ctx.obj['mass'] = mass
     ctx.obj['material'] = material
@@ -34,11 +37,15 @@ def cli(ctx,mass,out,material,interaction,sdir):
 @cli.command()
 @click.pass_context
 @click.option('-z',is_flag=True)
-def calcDiagonalTrans(ctx,z):
+@click.option('--short',is_flag=True)
+def calcDiagonalTrans(ctx,z,short):
     calctype = 'z' if z else 'y'
     stauObj = ctx.obj['stauObj']
     interaction = ctx.obj['interaction']
-    for iLogE in range(700):
+    loop = range(700) if not short else range(7)
+    factor = 1 if not short else 100
+    for i in range(700):
+        iLogE = int(i*factor)
         element = getElement(iLogE,iLogE,stauObj,calctype,interaction,method='quad')
         print(f'{iLogE}, {element:.10e}')
 
@@ -127,12 +134,77 @@ def sigmaMtx(ctx,method,verify):
     sigmaMtx = getSigmaArray(stauObj,interaction,method,verify)
     if verify:
         sys.exit()
-    with open(f'{filename}_sigma.txt','w') as f:
+    with open(f'{filename}_sigma_direct.txt','w') as f:
         for i,sigma in enumerate(sigmaMtx):
             f.write(str(sigma))
             if i+1 < len(sigmaMtx):
                 f.write(',')
     return 
+
+@cli.command()
+@click.pass_context
+@click.option('--method',type=str,default='quad')
+@click.option('--verify',is_flag=True)
+def sigmaMtxfromtrans(ctx,method,verify):
+    filename = ctx.obj['filename']
+    stauObj = ctx.obj['stauObj']
+    interaction = ctx.obj['interaction']
+    transMtx = []
+    with open(f'{filename}_surviv.txt','r') as f:
+        for line in f:
+            transMtx.append([float(x) for x in line.split(',')])
+    SumtransMtx = np.sum(np.array(transMtx),axis=1)
+    print(SumtransMtx)
+    transCutoff = []
+    for i in tqdm(range(700)):
+        result = getCutoff(i,stauObj,interaction)
+        transCutoff.append(result)
+    sigmaMtx = np.array(transCutoff) + SumtransMtx
+    with open(f'{filename}_sigma_diff.txt','w') as f:
+        for i,sigma in enumerate(sigmaMtx):
+            f.write(str(sigma))
+            if i+1 < len(sigmaMtx):
+                f.write(',')
+    return 
+
+@cli.command()
+@click.pass_context
+def cutoffMtx(ctx):
+    filename = ctx.obj['filename']
+    stauObj = ctx.obj['stauObj']
+    interaction = ctx.obj['interaction']
+    transCutoff = []
+    for i in tqdm(range(700)):
+        result = getCutoff(i,stauObj,interaction)
+        transCutoff.append(result)
+    with open(f'{filename}_sigma_diff_tmp.txt','w') as f:
+        for i,sigma in enumerate(transCutoff):
+            f.write(str(sigma))
+            if i+1 < len(transCutoff):
+                f.write(',')
+
+@cli.command()
+@click.pass_context
+def formsigmaMtx(ctx):
+    filename = ctx.obj['filename']
+    stauObj = ctx.obj['stauObj']
+    interaction = ctx.obj['interaction']
+    transMtx = []
+    with open(f'{filename}_surviv.txt','r') as f:
+        for line in f:
+            transMtx.append([float(x) for x in line.split(',')])
+    SumtransMtx = np.sum(np.array(transMtx),axis=1)
+    transCutoff = []
+    with open(f'{filename}_sigma_diff_tmp.txt','r') as f:
+        for line in f:
+            transCutoff.append([float(x) for x in line.split(',')])
+    SumtransCutoff = np.sum(np.array(transCutoff),axis=1)
+    sigmaMtx = SumtransCutoff + SumtransMtx
+    with open(f'{filename}_sigma_diff.txt','w') as f:
+        for i,sigma in enumerate(sigmaMtx):
+            f.write(str(sigma))
+            if i+1 < len(sigmaMtx):
+                f.write(',')
 
 @cli.command()
 @click.pass_context
@@ -157,7 +229,8 @@ def inelaMtx(ctx,method,verify):
 @click.option('-i',type=int,default=0)
 @click.option('-j',type=int,default=0)
 @click.option('-z',is_flag=True)
-def verifyTransElement(ctx,i,j,z):
+@click.option('--show',is_flag=True)
+def verifyTransElement(ctx,i,j,z,show):
     value = -1
     filename = ctx.obj['filename']
     filetype = 'surviv' if z else 'trans'
@@ -177,7 +250,7 @@ def verifyTransElement(ctx,i,j,z):
     stauObj = ctx.obj['stauObj']
     interaction = ctx.obj['interaction']
     calctype = 'z' if z else 'y'
-    element = getElement(i,j,stauObj,calctype,interaction,method='quad')
+    element = getElement(i,j,stauObj,calctype,interaction,method='quad',show=show)
     print(value, element)
     return
 
@@ -206,27 +279,80 @@ def verifyTransMtx(ctx,z):
 
 @cli.command()
 @click.pass_context
-@click.option('-i',type=int,default=0)
-@click.option('-j',type=int,default=0)
 @click.option('-z',is_flag=True)
-@click.option('--method',type=str,default='quad')
-def singleTransElement(ctx,i,j,z,method):
-    stauObj = ctx.obj['stauObj']
-    calctype = 'z' if z else 'y'
+@click.option('-d',is_flag=True)
+@click.option('-j',is_flag=True)
+def verifyAll(ctx,z,d,j):
+    filename = ctx.obj['filename']
     interaction = ctx.obj['interaction']
-    element = getElement(i,j,stauObj,calctype,interaction,method)
-    print(element)
+    filetype = 'surviv' if z else 'trans'
+    ii = 0
+    reconMtx = []
+    with open(f'{filename}_{filetype}.txt','r') as f:
+        for line in f:
+            reconMtx.append(np.array([float(x) for x in line.split(',')]))
+    sumreconMtx = np.sum(reconMtx,axis=1)
+
+    if j:
+        calctype = ''
+    elif d:
+        calctype = '_direct'
+    else:
+        calctype = '_diff'
+
+    with open(f'{filename}_sigma{calctype}.txt','r') as f:
+        sigma = np.array([float(x) for x in f.read().split(',')])
+
+    for i in range(len(sigma)):
+        diff = sigma[i]-sumreconMtx[i]
+        if diff<0:
+            color = '\033[31m' # red
+        else:
+            color = '\033[32m' # green
+        print(f'{sigma[i]:.10e}, {sumreconMtx[i]:.10e}, diff: {color}{diff:.10e}\033[0m')
+
+    plt.figure()
+    xdata = np.arange(len(sigma))
+    #plt.plot(xdata,sigma,label='sigma')
+    #plt.plot(xdata,sumreconMtx,label='sum dif',ls=':')
+    plt.plot(xdata,sigma-sumreconMtx)
+    plt.show()
     return
 
 @cli.command()
 @click.pass_context
-@click.option('-i',type=int,default=350)
-def verifyElement(ctx,i):
-    xdata = np.linspace(-0.005,0.005)
+@click.option('-i',type=int,default=0)
+@click.option('-j',type=int,default=0)
+@click.option('-z',is_flag=True)
+@click.option('--method',type=str,default='quad')
+@click.option('--show',is_flag=True)
+def singleTransElement(ctx,i,j,z,method,show):
     stauObj = ctx.obj['stauObj']
     calctype = 'z' if z else 'y'
     interaction = ctx.obj['interaction']
-    #ydata = stauObj.getDSigmaDy()
+    element = getElement(i,j,stauObj,calctype,interaction,method,show)
+    if not show:
+        print(element)
+    return
+
+@cli.command()
+@click.pass_context
+@click.option('-i',type=int,default=0)
+def showybounds(ctx,i):
+    stauObj = ctx.obj['stauObj']
+    E = 10**(5.+0.01*i)
+    interaction = ctx.obj['interaction']
+    print(stauObj.lim_y(E,interaction))
+
+@cli.command()
+@click.pass_context
+@click.option('-i',type=int,default=350)
+@click.option('-j',type=int,default=350)
+def verifyElementCalc(ctx,i,j):
+    stauObj = ctx.obj['stauObj']
+    calctype = 'z' if z else 'y'
+    interaction = ctx.obj['interaction']
+    element = getElement(i,j,stauObj,calctype,interaction,method='quad')
 
 def init(mass, material, out, interaction):
     stauObj = xs.XsecCalculator(m_lep=mass,material=material)
@@ -270,7 +396,7 @@ def getInelasticityArray(stauObj,interaction,method='quadLog',verify=False):
     print(inelaMtx[::10] if not verify else stauObj.NA/stauObj.A*inelaMtx)
     return inelaMtx
 
-def getElement(i,j,stauObj,YZ,interactionName,method='quad'):
+def getElement(i,j,stauObj,YZ,interactionName,method='quad',show=False):
     E = 10**(5.+0.01*i)
     if j > i:
         return 0.
@@ -278,12 +404,29 @@ def getElement(i,j,stauObj,YZ,interactionName,method='quad'):
     logYLow = logY - 0.5*0.01
     logYUp  = logY + 0.5*0.01
     if YZ == 'y':
-        result = stauObj.getPartialSigma(logYLow,logYUp,E,interactionName,method=method)
+        result = stauObj.getPartialSigma(logYLow,logYUp,E,interactionName,method=method,show=show)
     elif YZ == 'z':
-        result = stauObj.getSurviveProb(10**logYLow,10**logYUp,E,interactionName,method=method)
+        result = stauObj.getSurviveProb(10**logYLow,10**logYUp,E,interactionName,method=method,show=show)
     else:
         print('invalid')
         result = 0.
+    return result
+
+@cli.command()
+@click.pass_context
+@click.option('-i',type=int,default=350)
+def sigmacutoff(ctx,i):
+    stauObj = ctx.obj['stauObj']
+    interaction = ctx.obj['interaction']
+    result = getCutoff(i,stauObj,interaction,show=True)
+    return
+
+def getCutoff(i,stauObj,interactionName,method='quad',show=False):
+    E = 10**(5.+0.01*i)
+    logYLow = 0.01*(-i) - 0.5*0.01
+    YLow = 10**logYLow
+    Ymin = 0.0
+    result = stauObj.getSurviveProb(Ymin,YLow,E,interactionName,method=method,show=show)
     return result
 
 if __name__ == '__main__':

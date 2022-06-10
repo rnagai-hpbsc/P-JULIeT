@@ -34,7 +34,7 @@ class XsecCalculator:
         self.n = n
         self.accrho = False
         self.quadlimit = 200
-        self.eps = 1e-40
+        self.eps = 1e-50
         if material=='rock':
             self.Z = np.array([11.])
             self.A = np.array([22.])
@@ -124,12 +124,12 @@ class XsecCalculator:
         return ymin, ymax
 
     def limy_br(self, E_lep):
-        ymin = 1e-100
+        ymin = 1e-40
         ymax = np.min(1. - .75 * self.m_lep / E_lep * self.sqrtE * self.getZ3())
         return ymin, ymax 
 
     def limy_pn(self, E_lep):
-        ymin = 1e-100
+        ymin = 1e-40
         ymax = 1.
         return ymin, ymax
 
@@ -214,6 +214,8 @@ class XsecCalculator:
     # Bremsstrahlung 
     #------------------
     def getDSigmaDyBrems(self,y,E_lep):
+        if y < 1.e-5/E_lep: # cutoff: 10keV 
+            y = 1.e-5/E_lep
         factor = 4.*self.alpha**3*self.lambda_e**2/self.getMassRatio()**2/y
         chargeFactor = np.sum(self.Z*(self.Z+1)*(self.natoms*self.getChargeFactor(y,E_lep)))
         dsigmady = factor*chargeFactor
@@ -253,29 +255,29 @@ class XsecCalculator:
     # Photo-Nuclear 
     #-------------------
     def getDSigmaDyPhNuc(self,y,E_lep):
+        if y < 1e-5/E_lep: # cutoff : 10keV
+            y = 1e-5/E_lep
         factor = self.alpha/(8.*np.pi)
         atomicWeight = np.sum(self.A*self.natoms)
         softterm = np.sum(self.A*self.natoms*self.getSoftTerm(y,E_lep))
-        dsigmady = factor*softterm*self.getAbsorptionTerm(y,E_lep)*1.e-30*y + atomicWeight*self.getHardTerm(y,E_lep)
+        dsigmady = factor*softterm*self.getAbsorptionTerm(y*E_lep)*1.e-30*y + atomicWeight*self.getHardTerm(y,E_lep)
         return dsigmady 
 
     def getSoftTerm(self,y,E_lep):
         h = 1. - 2./y + 2./y**2
-        z = 0.00282*self.A**(1./3.)*self.getAbsorptionTerm(y,E_lep)
+        z = 0.00282*self.A**(1./3.)*self.getAbsorptionTerm(y*E_lep)
         t = self.m_lep**2*y**2/(1.-y)
         mSq = self.m_lep**2
         m1Sq = 0.54
         m2Sq = 1.80
-        m1 = np.sqrt(0.54)
-        m2 = np.sqrt(1.80)
         term = (h+2.*mSq/m2Sq)*np.log1p(m2Sq/t) - 2.*mSq/t*(1.-.25*m2Sq/t*np.log1p(t/m2Sq)) \
                 + self.getG(z, self.Z)*(h*(np.log1p(m1Sq/t)-m1Sq/(m1Sq + t)) \
                 + 4.*mSq/m1Sq*np.log1p(m1Sq/t) \
                 - 2.*mSq/t*(1.-(.25*m1Sq-t)/(m1Sq + t))) # Nucl. Phys. B 122 (2003) 341-344
         return term
 
-    def getAbsorptionTerm(self,y,E_lep):
-        return 114.3+1.647*(np.log(.0213*y*E_lep))**2
+    def getAbsorptionTerm(self,Ey):
+        return 114.3+1.647*(np.log(.0213)+np.log(Ey))**2
 
     def getG(self,z,arrayZ):
         gz = []
@@ -341,7 +343,7 @@ class XsecCalculator:
             print("Invalid Integration method. Return 0.")
             return 0
 
-    def getPartialSigma(self, logYLow, logYUp, E_lep, interactionName, method='quad'):
+    def getPartialSigma(self, logYLow, logYUp, E_lep, interactionName, method='quad',show=False):
         ymin, ymax = self.lim_y(E_lep, interactionName)
         LogYminBound = logYLow if logYLow > np.log10(ymin) else np.log10(ymin)
         LogYmaxBound = logYUp  if logYUp  < np.log10(ymax) else np.log10(ymax)
@@ -349,17 +351,21 @@ class XsecCalculator:
             def dsigmadylogfunc(logy):
                 return self.getDSigmaDy(10**logy,E_lep,interactionName,method='quad')*10**logy*np.log(10)
             integral = quad(dsigmadylogfunc,LogYminBound,LogYmaxBound,epsabs=self.eps)[0]
+            if show:
+                print(LogYminBound, LogYmaxBound, integral)
             return integral if integral > 0 else 0
         elif method=='quad':
             def dsigmadyfunc(y):
                 return self.getDSigmaDy(y,E_lep,interactionName,method='quad')
             integral = quad(dsigmadyfunc, 10**LogYminBound, 10**LogYmaxBound,epsabs=self.eps)[0]
+            if show:
+                print(10**LogYminBound, 10**LogYmaxBound, integral)
             return integral if integral > 0 else 0
         else:
             print("Invalid Integration method. Return 0.")
             return 0
 
-    def getSurviveProb(self, ZLow, ZUp, E_lep, interactionName, method='quad'):
+    def getSurviveProb(self, ZLow, ZUp, E_lep, interactionName, method='quad',show=False):
         ymin, ymax = self.lim_y(E_lep, interactionName)
         ZminBound = ZLow if ZLow > 1.-ymax else 1.-ymax
         ZmaxBound = ZUp  if ZUp  < 1.-ymin else 1.-ymin
@@ -367,11 +373,15 @@ class XsecCalculator:
             def dsigmadzlogfunc(logz):
                 return self.getDSigmaDy(1.-10**logz,E_lep,interactionName,method='quad')*(1.-10**logz)*np.log(10)
             integral = quad(dsigmadzlogfunc,np.log10(ZminBound),np.log10(ZmaxBound),epsabs=self.eps,limit=self.quadlimit)[0]
+            if show:
+                print(1-ZmaxBound,1-ZminBound,integral)
             return integral if integral > 0 else 0
         elif method == 'quad':
             def dsigmadzfunc(z):
                 return self.getDSigmaDy(1.-z,E_lep,interactionName,method='quad')
             integral = quad(dsigmadzfunc,ZminBound,ZmaxBound,epsabs=self.eps,limit=self.quadlimit)[0]
+            if show:
+                print(1-ZmaxBound, 1-ZminBound, integral)
             return integral if integral > 0 else 0
         else:
             print("Invalid Integration method. Return 0.")
