@@ -12,16 +12,28 @@ EPSNUM = 3.e-26
 
 @click.group()
 @click.option('--mass',type=int,default=150)
+@click.option('--smin',default=None)
 @click.option('--out',type=str,default='e')
 @click.option('--material',type=str,default='rock')
 @click.option('--interaction',type=str,required=True)
 @click.option('--sdir',type=str,default='test')
 @click.option('--eps',default=None)
+@click.option('--quadlimit',default=None)
 @click.pass_context
-def cli(ctx,mass,out,material,interaction,sdir,eps):
+def cli(ctx,mass,out,material,interaction,sdir,eps,smin,quadlimit):
+    if smin is not None:
+        xsobj = xs.XsecCalculator(m_lep=mass,material=material)
+        if smin == 'e':
+            mass = xsobj.getME()
+        elif smin == 'mu':
+            mass = xsobj.getMMU()
+        elif smin == 'tau':
+            mass = xsobj.getMTAU()
     stauObj, interactionName = init(mass,material,out,interaction)
     if eps is not None:
         stauObj.setEps(float(eps))
+    if quadlimit is not None:
+        stauObj.setQuadlimit(int(quadlimit))
     ctx.ensure_object(dict)
     ctx.obj['mass'] = mass
     ctx.obj['material'] = material
@@ -29,7 +41,7 @@ def cli(ctx,mass,out,material,interaction,sdir,eps):
     ctx.obj['interactionName'] = interactionName
     ctx.obj['interaction'] = interaction
     ctx.obj['sdir'] = sdir
-    filename = f'data/{sdir}/stau{interactionName}Mtx{mass}GeV'
+    filename = f'data/{sdir}/stau{interactionName}Mtx{mass}GeV' if smin is None else f'data/{sdir}/{smin}{interactionName}Mtx'
     os.makedirs(f'data/{sdir}',exist_ok=True)
     ctx.obj['filename'] = filename
     pass
@@ -113,6 +125,9 @@ def formTransMtx(ctx,z):
             else:
                 transMtx[int(words[0])][int(words[1])] = float(words[2])
         print(f'Processed #line: {linenumber}')
+    if os.path.exists(f'{filename}_{filetype}.txt'):
+        print('Warning! The output file already exists. Exit.')
+        return
     with open(f'{filename}_{filetype}.txt','w') as f:
         for i,transs in enumerate(transMtx):
             for j,trans in enumerate(transs):
@@ -122,6 +137,106 @@ def formTransMtx(ctx,z):
                 elif i+1 < len(transMtx):
                     f.write('\n')
     return 
+
+@cli.command()
+@click.pass_context
+@click.option('-z',is_flag=True)
+@click.option('--verify',is_flag=True, default=False)
+@click.option('--wointegral',is_flag=True, default=False)
+def fixTransMtx(ctx,z,verify,wointegral):
+    filename = ctx.obj['filename']
+    filetype = 'surviv' if z else 'trans'
+    if not os.path.exists(f'{filename}_{filetype}.txt'):
+        print('File not found. Do formTransMtx or make transMtx first. Exit.')
+        return
+    else:
+        if not verify:
+            if os.path.exists(f'{filename}_{filetype}.txt_BAK'):
+                os.system(f'rsync -av {filename}_{filetype}.txt {filename}_{filetype}.txt_BAK2')
+            else:
+                os.system(f'rsync -av {filename}_{filetype}.txt {filename}_{filetype}.txt_BAK')
+                os.system(f'chmod -w {filename}_{filetype}.txt_BAK')
+    stauObj = ctx.obj['stauObj']
+    interaction = ctx.obj['interaction']
+    calctype = 'z' if z else 'y'
+    reconMtx = []
+    sumdatalist = []
+    elementlist = []
+    flag = False
+    with open(f'{filename}_{filetype}.txt','r') as f:
+        for line in f:
+            reconMtx.append(np.array([float(x) for x in line.split(',')]))
+    for N in tqdm(range(350*701)):
+        i, j = getij(N)
+        value = reconMtx[i][j]
+        if i>0:
+            if verify & (i==j) & (i>500):
+                if wointegral:
+                    element = value
+                else:
+                    element = getElement(i,j,stauObj,calctype,interaction,method='quad')
+                if calctype=='z':
+                    xdata, data = getSimpleZintegration(stauObj,i,j,interaction)
+                else:
+                    xdata = []
+                    data = []
+                sumdata = 0
+                for k in range(len(xdata)-1):
+                    sumdata += (data[k+1]+data[k])*(xdata[k+1]-xdata[k])/2
+                tqdm.write(f'Verification Notice: ({i},{j}): {value:.15e}, {element:.15e}, {sumdata:.15e}')
+                sumdatalist.append(sumdata)
+                elementlist.append(element)
+            elif reconMtx[i-1][j-1]*0.95 > reconMtx[i][j]:
+                element = getElement(i,j,stauObj,calctype,interaction,method='quad')
+                if calctype=='z':
+                    xdata, data = getSimpleZintegration(stauObj,i,j,interaction)
+                else:
+                    xdata = []
+                    data = []
+                sumdata = 0
+                for k in range(len(xdata)-1):
+                    sumdata += (data[k+1]+data[k])*(xdata[k+1]-xdata[k])/2
+                tqdm.write(f'WARNING: Trans should be constantly increasing... ({i},{j}): {value}, {element}, {sumdata}')
+                if (element > reconMtx[i][j-1]*0.95) & (element > reconMtx[i-1][j-1]*0.95):
+                    reconMtx[i][j] = element
+                    flag = True
+                elif sumdata > reconMtx[i][j-1]*0.95:
+                    reconMtx[i][j] = sumdata
+                    flag = True                
+        elif value <= 0.0:
+            element = getElement(i,j,stauObj,calctype,interaction,method='quad')
+            if element:
+                reconMtx[i][j] = element
+                tqdm.write(f"WARNING: Wrong value for (i,j) == ({i},{j}), value == {value}, truth == {element}")
+                flag = True
+            elif calctype=='z':
+                xdata, data = getSimpleZintegration(stauObj,i,j,interaction)
+                sumdata = 0
+                for k in range(len(xdata)-1):
+                    sumdata += (data[k+1]+data[k])*(xdata[k+1]-xdata[k])/2
+                tqdm.write(f"WARNING: Wrong value for (i,j) == ({i},{j}), value == {value}, truth == {element}, simple == {sumdata}")
+                if sumdata > 0:
+                    reconMtx[i][j] = sumdata
+                    flag = True
+    if verify:
+        import matplotlib.pyplot as plt
+        plt.plot(range(len(sumdatalist)),sumdatalist)
+        plt.plot(range(len(elementlist)),elementlist)
+        plt.show()
+        if flag:
+            print('Need to fix matrix elements.\nVerification Done. Exit.')
+        return
+    
+    if flag:
+        with open(f'{filename}_{filetype}.txt','w') as f:
+            for i,transs in enumerate(reconMtx):
+                for j,trans in enumerate(transs):
+                    f.write(str(trans))
+                    if j+1 < len(transs):
+                        f.write(',')
+                    elif i+1 < len(reconMtx):
+                        f.write('\n')
+    return
 
 @cli.command()
 @click.pass_context
@@ -185,7 +300,8 @@ def cutoffMtx(ctx):
 
 @cli.command()
 @click.pass_context
-def formsigmaMtx(ctx):
+@click.option('--verify',is_flag=True,default=False)
+def formsigmaMtx(ctx,verify):
     filename = ctx.obj['filename']
     stauObj = ctx.obj['stauObj']
     interaction = ctx.obj['interaction']
@@ -198,8 +314,16 @@ def formsigmaMtx(ctx):
     with open(f'{filename}_sigma_diff_tmp.txt','r') as f:
         for line in f:
             transCutoff.append([float(x) for x in line.split(',')])
-    SumtransCutoff = np.sum(np.array(transCutoff),axis=1)
+    SumtransCutoff = np.array(transCutoff[0])#np.sum(np.array(transCutoff),axis=1)
     sigmaMtx = SumtransCutoff + SumtransMtx
+    if verify:
+        print(SumtransMtx, SumtransCutoff, sigmaMtx)
+        import matplotlib.pyplot as plt
+        plt.plot(np.arange(700),SumtransMtx)
+        plt.plot(np.arange(700),SumtransCutoff)
+        plt.plot(np.arange(700),sigmaMtx)
+        plt.show()
+        return
     with open(f'{filename}_sigma_diff.txt','w') as f:
         for i,sigma in enumerate(sigmaMtx):
             f.write(str(sigma))
@@ -272,9 +396,10 @@ def verifyTransMtx(ctx,z):
         value = reconMtx[i][j]
         if value <= 0.0:
             element = getElement(i,j,stauObj,calctype,interaction,method='quad')
-            print(f"WARNING: Wrong value for (i,j) == ({i},{j}), value == {value}, truth == {element}")
-            with open(f"{ctx.obj['filename']}_{filetype}_tmp.txt",'a') as f:
-                f.write(f'{i},{j},{element}\n')
+            if value != element:
+                print(f"WARNING: Wrong value for (i,j) == ({i},{j}), value == {value}, truth == {element}")
+                with open(f"{ctx.obj['filename']}_{filetype}_tmp.txt",'a') as f:
+                    f.write(f'{i},{j},{element}\n')
     return
 
 @cli.command()
@@ -326,15 +451,86 @@ def verifyAll(ctx,z,d,j):
 @click.option('-z',is_flag=True)
 @click.option('--method',type=str,default='quad')
 @click.option('--show',is_flag=True)
-def singleTransElement(ctx,i,j,z,method,show):
+@click.option('--div',default=100)
+def singleTransElement(ctx,i,j,z,method,show,div):
     stauObj = ctx.obj['stauObj']
     calctype = 'z' if z else 'y'
     interaction = ctx.obj['interaction']
     element = getElement(i,j,stauObj,calctype,interaction,method,show)
     if not show:
         print(element)
+        import matplotlib.pyplot as plt
+        E = 10**(5.+0.01*i)
+        logY = 0.01*(j-i)
+        logYLow = logY - 0.5*0.01
+        logYUp  = logY + 0.5*0.01
+        ymin, ymax = stauObj.lim_y(E, interaction)
+        ZminBound = 10**logYLow if 10**logYLow > 1.-ymax else 1.-ymax
+        ZmaxBound = 10**logYUp  if 10**logYUp  < 1.-ymin else 1.-ymin
+        print(ZminBound, ZmaxBound, ymin)
+        dx = ZmaxBound - ZminBound
+        #xdata = [ZminBound + dx*(1-2**(-N)) for N in range(div)]
+        #data = np.array([stauObj.getDSigmaDy(1.-z,E,interaction,method='quad') for z in xdata])
+        xdata = 10**np.linspace(np.log10((1-ZmaxBound) if (1-ZmaxBound)!=0 else ymin),np.log10(1-ZminBound),div)
+        data = np.array([stauObj.getDSigmaDy(z,E,interaction,method='quad') for z in xdata])
+        plt.plot(xdata,data)
+        #print(xdata, data)
+        sumdata = 0
+        for k in range(len(xdata)-1):
+            #if data[i+1]==data[i]:
+            #    continue
+            sumdata += (data[k+1]+data[k])*(xdata[k+1]-xdata[k])/2
+        print(sumdata)
+        plt.yscale('log')
+        #plt.xscale('log')
+        plt.xlabel('inelasticity y')
+        plt.ylabel('Differential Cross Section $\mathrm{d}\sigma/\mathrm{d}y$')
+        plt.tight_layout()
+        plt.savefig('plot__.pdf')
+        plt.show()
+        
     return
 
+def getSimpleZintegration(stauObj,i,j,interaction,div=10000):
+    E = 10**(5.+0.01*i)
+    logY = 0.01*(j-i)
+    logYLow = logY - 0.5*0.01
+    logYUp  = logY + 0.5*0.01
+    ymin, ymax = stauObj.lim_y(E, interaction)
+    ZminBound = 10**logYLow if 10**logYLow > 1.-ymax else 1.-ymax
+    ZmaxBound = 10**logYUp  if 10**logYUp  < 1.-ymin else 1.-ymin
+    #print(ZminBound, ZmaxBound, ymin)
+    dx = ZmaxBound - ZminBound
+    xdata = 10**np.linspace(np.log10((1-ZmaxBound) if (1-ZmaxBound)!=0 else ymin),np.log10(1-ZminBound),div)
+    data = np.array([stauObj.getDSigmaDy(z,E,interaction,method='quad') for z in xdata])
+    return xdata, data
+
+@cli.command()
+@click.pass_context
+@click.option('-i',type=int,default=0)
+@click.option('-j',type=int,default=0)
+@click.option('--plot',is_flag=True,default=False)
+def scanDivforSimpleSum(ctx,i,j,plot):
+    stauObj = ctx.obj['stauObj']
+    interaction = ctx.obj['interaction']
+    element = getElement(i,j,stauObj,'z',interaction,'quad',False)
+    diff = []
+    step = 200
+    divs = (np.arange(100)+1)*step
+    for div in divs:
+        xdata, data = getSimpleZintegration(stauObj,i,j,interaction,div)
+        sumdata = 0
+        for k in range(len(xdata)-1):
+            sumdata += (data[k+1]+data[k])*(xdata[k+1]-xdata[k])/2
+        print(f'{div}, {sumdata:.15e}, {sumdata-element:.15e}')
+        diff.append(np.abs(sumdata-element))
+    diff = np.array(diff)
+    if plot:
+        import matplotlib.pyplot as plt
+        plt.plot(divs,diff/element*100)
+        plt.yscale('log')
+        plt.show()
+        
 @cli.command()
 @click.pass_context
 @click.option('-i',type=int,default=0)
