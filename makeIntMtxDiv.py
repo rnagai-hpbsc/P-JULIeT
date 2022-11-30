@@ -571,25 +571,33 @@ def init(mass, material, out, interaction):
     return stauObj, interactionName
 
 def getSigmaArray(stauObj,interaction,method='quadLog',verify=False):
+    logeArray = []
     sigmaMtx = []
     totalnumber = 700 if not verify else 7
     for i in tqdm(range(totalnumber)):
         logE = i if not verify else 100*i
         E = 10**(5+0.01*logE)
+        logeArray.append(logE)
         sigma = stauObj.getSigma(E,interaction,method)
         sigmaMtx.append(sigma)
+    print(logeArray[::10] if not verify else logeArray)
     print(sigmaMtx[::10] if not verify else sigmaMtx)
     return sigmaMtx
 
 def getInelasticityArray(stauObj,interaction,method='quadLog',verify=False):
+    logeArray = []
     inelaMtx = []
+    massnumber = np.sum(stauObj.A * stauObj.natoms)
     totalnumber = 700 if not verify else 7
     for i in tqdm(range(totalnumber)):
         logE = i if not verify else 100*i
         E = 10**(5+0.01*logE)
+        logeArray.append(logE)
         inela = stauObj.getEnergyLossRaw(E,interaction,method)
+        print(inela)
         inelaMtx.append(inela)
-    print(inelaMtx[::10] if not verify else stauObj.NA/stauObj.A*inelaMtx)
+    print(logeArray[::10] if not verify else logeArray)
+    print(inelaMtx[::10] if not verify else stauObj.NA/massnumber*np.array(inelaMtx))
     return inelaMtx
 
 def getElement(i,j,stauObj,YZ,interactionName,method='quad',show=False):
