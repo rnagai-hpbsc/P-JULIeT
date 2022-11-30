@@ -1,0 +1,19 @@
+#test1 
+
+Executable = ./makeIntMtxDiv.py
+Universe = vanilla
+Getenv = True
+Notification = Error
+
+p1 = PARTICLE
+p2 = MASS
+p3 = TODAYSDATE
+p4 = INTERACTION
+## e - surviv
+Output = condor/log/ver$(p3)/$(p1)$(p2)$(p4)sigmadirect.stdout
+Error  = condor/log/ver$(p3)/$(p1)$(p2)$(p4)sigmadirect.stderr
+Log    = condor/log/ver$(p3)/$(p1)$(p2)$(p4)sigmadirect.log
+
+Arguments = --out $(p1) --mass $(p2) --interaction $(p4) --sdir condor_$(p3) sigmamtx
+Queue 
+

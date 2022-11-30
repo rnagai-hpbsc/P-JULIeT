@@ -10,9 +10,9 @@ p2 = MASS
 p3 = TODAYSDATE
 p4 = INTERACTION
 ## e - surviv
-Output = condor/log/ver$(p3)/$(p1)$(p2)$(p4)sigma.stdout
-Error  = condor/log/ver$(p3)/$(p1)$(p2)$(p4)sigma.stderr
-Log    = condor/log/ver$(p3)/$(p1)$(p2)$(p4)sigma.log
+Output = condor/log/ver$(p3)/$(p1)$(p2)$(p4)sigmadiff.stdout
+Error  = condor/log/ver$(p3)/$(p1)$(p2)$(p4)sigmadiff.stderr
+Log    = condor/log/ver$(p3)/$(p1)$(p2)$(p4)sigmadiff.log
 
 Arguments = --out $(p1) --mass $(p2) --interaction $(p4) --sdir condor_$(p3) cutoffmtx
 Queue 
